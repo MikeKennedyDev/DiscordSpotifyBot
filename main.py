@@ -1,14 +1,13 @@
 import os
 
 import discord
-import GlobalSettings
+import requests
 from MLibSpotify import Utilities
-from MLibSpotify.SpotifyPlaylist import AuthorizationValues
-from MLibSpotify.SpotifyPlaylist import SpotifyPlaylist
+from dotenv import load_dotenv
 
+load_dotenv()
 intents = discord.Intents.all()
-# intents.messages = True
-# intents.guild_messages = True
+# TODO: Do I need all intents?
 
 client = discord.Client(intents=intents)
 
@@ -20,23 +19,23 @@ async def on_ready():
 
 @client.event
 async def on_message(message):
-    print(f'message: {message.content}')
+    track_ids = GetIdsFromMessage(message.content)
 
-    track_uris = GetIdsFromMessage(message.content)
+    # message.guild = Server name
+    # message.channel = name of channel in server
 
-    if track_uris is not None:
-        print('uris found:')
-        for uri in track_uris:
-            print(uri)
-        playlist = GetPlaylistByChannel(message.guild)
-        print('Trying to add tracks')
-        playlist.AddTracks(tracks=track_uris)
+    if track_ids is not None:
+        playlist_id = GetPlaylistIdByChannel(message.guild)
+        for track_id in track_ids:
+            print(f'Adding track:{track_id} to playlist:{playlist_id}')
+            response = requests.get(f'{os.getenv("API_BASE")}/addTrack/{playlist_id}/{track_id}')
+            if response.ok:
+                print('Track added')
+            else:
+                None
+                # TODO: Throw if response if bad
     else:
         print('No spotify link found in message.')
-
-
-def SelectPlaylist(guild):
-    return '2UmDYQxgIDaKikeG53Ffd5'
 
 
 def GetIdsFromMessage(message):
@@ -50,33 +49,9 @@ def GetIdsFromMessage(message):
     return [Utilities.GetTrackId(link) for link in track_links]
 
 
-def GetPlaylistByChannel(guild):
-    authorization_values = AuthorizationValues(client_id=GlobalSettings.CLIENT_ID,
-                                               client_secret=GlobalSettings.CLIENT_SECRET,
-                                               scope='playlist-read-collaborative playlist-modify-public')
-
-    playlist = SpotifyPlaylist(authorization_values=authorization_values,
-                               playlist_id='2UmDYQxgIDaKikeG53Ffd5')
-    print('Completed playlist modeling')
-    return playlist
+def GetPlaylistIdByChannel(guild):
+    # print(guild)
+    return '2UmDYQxgIDaKikeG53Ffd5'
 
 
-client.run(GlobalSettings.TOKEN)
-
-# print('Playlist test')
-# TestPlaylistId = '2UmDYQxgIDaKikeG53Ffd5'
-# TestTrackIds = ['56rgqDNRIqKq0qIMdu7r4r', '1rWzYSHyZ5BiI4DnDRCwy7']
-# auth = AuthorizationValues(client_id=GlobalSettings.CLIENT_ID,
-#                            client_secret=GlobalSettings.CLIENT_SECRET,
-#                            scope='playlist-read-collaborative playlist-modify-public')
-# playlist = SpotifyPlaylist(auth, playlist_id=TestPlaylistId)
-#
-# original_num_tracks = len(playlist.GetAllTracks())
-# print(f'Originally {original_num_tracks} tracks')
-#
-# playlist.AddTracks(TestTrackIds)
-# print(f'{len(TestTrackIds)} tracks added')
-#
-# new_num_tracks = len(playlist.GetAllTracks(force_refresh=True))
-# print(f'Now {new_num_tracks} tracks')
-# print('Playlist test complete')
+client.run(os.getenv("TOKEN"))
