@@ -1,3 +1,6 @@
 --extra-index-url=https://MLibSpotify:lw5rvladoqcdmym5kuzfse6cgtt4neayohm4zjb5mfdjxq5y33ha@pkgs.dev.azure.com/MikeKennedyDev/Libraries/_packaging/MLibSpotify/pypi/simple/
 MLibSpotify==2.1.10
 discord.py==2.0.1
+requests~=2.28.1
+python-dotenv~=0.21.0
+pyodbc~=4.0.34

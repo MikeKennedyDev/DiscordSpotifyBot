@@ -2,20 +2,25 @@ import os
 
 import discord
 import requests
-from MLibSpotify import Links, Utilities
+import pyodbc
+from MLibSpotify import Links
 from dotenv import load_dotenv
 
 load_dotenv()
+
+import pyodbc
+
+sql_connection = pyodbc.connect('DRIVER=' + os.getenv("DRIVER") +
+                                ';SERVER=tcp:' + os.getenv("SERVER") +
+                                ';PORT=1433;DATABASE=' + os.getenv("DATABASE") +
+                                ';UID=' + os.getenv("UNAME") +
+                                ';PWD=' + os.getenv("PASSWORD"))
+cursor = sql_connection.cursor()
+
 intents = discord.Intents.all()
 # TODO: Do I need all intents?
 
 client = discord.Client(intents=intents)
-__help_message = '''
-The playlist currently mapped to this channel is: XXX
-Simply post a spotify track in the channel to add it to the playlist.
-To map a playlist to this channel, use the command:
-/AddPlaylist <playlist-url>
-'''
 
 
 @client.event
@@ -26,36 +31,36 @@ async def on_ready():
 @client.event
 async def on_message(message):
     if message.content == '/help':
-        await message.channel.send(__help_message)
+        await message.channel.send(GetHelpMessage())
         return
 
     if '/AddPlaylist' in message.content:
-        await message.channel.send('Oh we finna add this bitch')
         MapNewPlaylist(message)
         return
 
     track_ids = GetIdsFromMessage(message.content)
 
-    # message.guild = Server name
-    # message.channel = name of channel in server
-
     if track_ids is not None:
-        playlist_id = GetPlaylistIdByChannel(message.guild)
+        playlist_id = GetPlaylistIdByChannel(message)
+        print(f'Playlist_id found: {playlist_id}')
         for track_id in track_ids:
-            print(f'Adding track:{track_id} to playlist:{playlist_id}')
+            print(f'Adding track: {track_id} to playlist: {playlist_id}')
             response = requests.post(f'{os.environ["API_BASE"]}/addTrack/{playlist_id}/{track_id}')
             if response.ok:
                 print('Track added')
             else:
-                error_msg = response.json()['error']['message']
-                print(f"Track add failure: "
-                      f"response: {response}"
-                      f"error message: {error_msg}")
+                print(response.json())
+                return
+                # error_msg = response.json()['error']['message']
+                # print(f"Track add failure: "
+                #       f"response: {response}"
+                #       f"error message: {error_msg}")
     else:
         print('No spotify link found in message.')
 
 
 def GetIdsFromMessage(message):
+
     track_links = Links.GetSpotifyLinks(message)
     if track_links is None:
         print('No links in message')
@@ -66,14 +71,42 @@ def GetIdsFromMessage(message):
     return [Links.GetTrackId(link) for link in track_links]
 
 
-def GetPlaylistIdByChannel(guild):
-    # print(guild)
-    return '2UmDYQxgIDaKikeG53Ffd5'
+def GetPlaylistIdByChannel(message):
+    cursor.execute('''
+    SELECT PlaylistId FROM [dbo].[Playlists]
+    WHERE DiscordServer = ?
+    AND DiscordChannel = ?
+        ''', [str(message.guild), str(message.channel)])
+
+    playlist_id = cursor.fetchone()
+    if not playlist_id:
+        raise Exception("No playlist currently associated with this channel")
+
+    return playlist_id[0]
 
 
 def MapNewPlaylist(message):
     playlist_url = message.content.split()[1]
-    print(f'Adding playlist: {playlist_url}')
+    print(f'Mapping playlist: {playlist_url} to current channel')
+
+    # message.guild = Server name
+    # message.channel = name of channel in server
+    print(f'Server: {message.guild}')
+    print(f'Channel: {message.channel}')
+
+    cursor.execute('''
+SELECT * FROM [dbo].[Playlists]
+WHERE DiscordServer = ?
+AND DiscordChannel = ?
+    ''', [str(message.guild), str(message.channel)])
+
+
+    while 1:
+        row = cursor.fetchone()
+        if not row:
+            print('Playlist not currently mapped')
+            break
+        print(row)
 
     playlist_id = Links.GetPlaylistId(playlist_url)
     print(f'playlist_id: {playlist_id}')
@@ -81,5 +114,15 @@ def MapNewPlaylist(message):
     return None
 
 
+def GetHelpMessage():
+    return f'''
+The playlist currently mapped to this channel is: {"poop"}
+Simply post a spotify track in the channel to add it to the playlist.
+To map a playlist to this channel, use the command:
+/AddPlaylist <playlist-url>
+'''
+
+
 if __name__ == '__main__':
+    print('starting up')
     client.run(os.environ["TOKEN"])
