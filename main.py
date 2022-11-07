@@ -81,4 +81,5 @@ def MapNewPlaylist(message):
     return None
 
 
-client.run(os.environ["TOKEN"])
+if __name__ == '__main__':
+    client.run(os.environ["TOKEN"])
