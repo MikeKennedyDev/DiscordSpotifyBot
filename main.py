@@ -1,20 +1,21 @@
 import os
+import threading
 
 import discord
-import requests
-import pyodbc
 from MLibSpotify import Links
+from MLibSpotify.SpotifyPlaylist import SpotifyPlaylist
 from dotenv import load_dotenv
+import pyodbc
 
 load_dotenv()
+__playlist_cache = []
 
-import pyodbc
+sql_connection = pyodbc.connect('DRIVER=' + os.environ["DRIVER"] +
+                                ';SERVER=tcp:' + os.environ["SERVER"] +
+                                ';PORT=1433;DATABASE=' + os.environ["DATABASE"] +
+                                ';UID=' + os.environ["UNAME"] +
+                                ';PWD=' + os.environ["PASSWORD"])
 
-sql_connection = pyodbc.connect('DRIVER=' + os.getenv("DRIVER") +
-                                ';SERVER=tcp:' + os.getenv("SERVER") +
-                                ';PORT=1433;DATABASE=' + os.getenv("DATABASE") +
-                                ';UID=' + os.getenv("UNAME") +
-                                ';PWD=' + os.getenv("PASSWORD"))
 cursor = sql_connection.cursor()
 
 intents = discord.Intents.all()
@@ -31,98 +32,138 @@ async def on_ready():
 @client.event
 async def on_message(message):
     if message.content == '/help':
-        await message.channel.send(GetHelpMessage())
+        await message.channel.send(GetHelpMessage(message))
         return
 
-    if '/AddPlaylist' in message.content:
-        MapNewPlaylist(message)
+    elif '/AddPlaylist' in message.content:
+        result = MapNewPlaylist(message)
+        await message.channel.send(result)
         return
 
-    track_ids = GetIdsFromMessage(message.content)
+    elif '/RemovePlaylist' in message.content:
+        RemoveMappedPlaylist(message)
+        await message.channel.send("Playlist unlinked from current channel")
+        return
 
-    if track_ids is not None:
-        playlist_id = GetPlaylistIdByChannel(message)
-        print(f'Playlist_id found: {playlist_id}')
-        for track_id in track_ids:
-            print(f'Adding track: {track_id} to playlist: {playlist_id}')
-            response = requests.post(f'{os.environ["API_BASE"]}/addTrack/{playlist_id}/{track_id}')
-            if response.ok:
-                print('Track added')
-            else:
-                print(response.json())
-                return
-                # error_msg = response.json()['error']['message']
-                # print(f"Track add failure: "
-                #       f"response: {response}"
-                #       f"error message: {error_msg}")
+    elif GetIdsFromMessage(message.content) is not None:
+
+        track_ids = GetIdsFromMessage(message.content)
+        playlists = GetPlaylistsByChannel(message)
+
+        for playlist in playlists:
+            playlist.AddTracks(track_ids)
+
     else:
         print('No spotify link found in message.')
 
 
 def GetIdsFromMessage(message):
+    try:
+        track_links = Links.GetSpotifyLinks(message)
 
-    track_links = Links.GetSpotifyLinks(message)
-    if track_links is None:
-        print('No links in message')
+        if track_links is None:
+            return None
+
+        return [Links.GetTrackId(link) for link in track_links]
+
+    except:
         return None
-    print('links:')
-    for link in track_links:
-        print(link)
-    return [Links.GetTrackId(link) for link in track_links]
 
 
-def GetPlaylistIdByChannel(message):
+def GetPlaylistsByChannel(message):
     cursor.execute('''
     SELECT PlaylistId FROM [dbo].[Playlists]
     WHERE DiscordServer = ?
     AND DiscordChannel = ?
         ''', [str(message.guild), str(message.channel)])
 
-    playlist_id = cursor.fetchone()
-    if not playlist_id:
-        raise Exception("No playlist currently associated with this channel")
+    ids = cursor.fetchall()
+    playlists = []
 
-    return playlist_id[0]
+    if ids is not None:
+        playlist_ids = [id[0] for id in ids]
+
+        for playlist_id in playlist_ids:
+            print(f'Using playlist id: {playlist_id}')
+
+            # check __playlist cache before calling spotify API
+            if __playlist_cache is not None and playlist_id in [playlist.PlaylistId for playlist in __playlist_cache]:
+                print('Playlist found in playlist cache.')
+                playlists.append(next(p for p in __playlist_cache if p.PlaylistId == playlist_id))
+
+            else:
+                print('Playlist not found in playlist cache, generating new playlist object.')
+                playlist = SpotifyPlaylist(playlist_id=playlist_id,
+                                           client_id=os.environ["CLIENT_ID"],
+                                           client_secret=os.environ["CLIENT_SECRET"],
+                                           refresh_token=os.environ["REFRESH_TOKEN"])
+                playlists.append(playlist)
+                __playlist_cache.append(playlist)
+
+        return playlists
 
 
 def MapNewPlaylist(message):
-    playlist_url = message.content.split()[1]
-    print(f'Mapping playlist: {playlist_url} to current channel')
+    try:
+        playlist_url = message.content.split()[1]
+        playlist_id = Links.GetPlaylistId(playlist_url)
+        print(f'Mapping playlist: {playlist_id} to current channel')
 
-    # message.guild = Server name
-    # message.channel = name of channel in server
-    print(f'Server: {message.guild}')
-    print(f'Channel: {message.channel}')
+        cursor.execute('''
+        INSERT INTO [dbo].[Playlists]
+        VALUES (?, ?, ?);
+        ''', [playlist_id, str(message.guild), str(message.channel)])
+
+        sql_connection.commit()
+        return "Playlist linked to current channel."
+
+    except:
+        return "Playlist already mapped to current channel."
+
+
+def RemoveMappedPlaylist(message):
+    playlist_url = message.content.split()[1]
+    playlist_id = Links.GetPlaylistId(playlist_url)
+    print(f'Mapping playlist: {playlist_id} to current channel')
 
     cursor.execute('''
-SELECT * FROM [dbo].[Playlists]
-WHERE DiscordServer = ?
-AND DiscordChannel = ?
-    ''', [str(message.guild), str(message.channel)])
+DELETE FROM [dbo].[Playlists]
+WHERE PlaylistId = ?
+    AND DiscordServer = ?
+    AND DiscordChannel = ?
+    ''', [playlist_id, str(message.guild), str(message.channel)])
+
+    sql_connection.commit()
 
 
-    while 1:
-        row = cursor.fetchone()
-        if not row:
-            print('Playlist not currently mapped')
-            break
-        print(row)
+def GetHelpMessage(message):
+    currentPlaylists = GetPlaylistsByChannel(message)
+    displayPlaylists = '\n'.join([f"{playlist.PlaylistName} ({playlist.PlaylistUrl})" for playlist in currentPlaylists])
 
-    playlist_id = Links.GetPlaylistId(playlist_url)
-    print(f'playlist_id: {playlist_id}')
-
-    return None
-
-
-def GetHelpMessage():
     return f'''
-The playlist currently mapped to this channel is: {"poop"}
-Simply post a spotify track in the channel to add it to the playlist.
+The playlist(s) currently mapped to this channel are:
+{displayPlaylists}
+
+Simply post a spotify track in the channel to add it to the playlist(s).
+
 To map a playlist to this channel, use the command:
 /AddPlaylist <playlist-url>
+
+To disconnect a playlist from this channel, use the command:
+/RemovePlaylist <playlist-url>
 '''
+
+
+def FlushPlaylistCache():
+    print('Flushing playlist cache')
+    __playlist_cache = []
+    threading.Timer(86400, FlushPlaylistCache).start()
 
 
 if __name__ == '__main__':
     print('starting up')
+
+    # Flush playlist cache daily
+    FlushPlaylistCache()
+
     client.run(os.environ["TOKEN"])
