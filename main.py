@@ -31,30 +31,43 @@ async def on_ready():
 
 @client.event
 async def on_message(message):
-    if message.content == '/help':
-        await message.channel.send(GetHelpMessage(message))
-        return
+    try:
 
-    elif '/AddPlaylist' in message.content:
-        result = MapNewPlaylist(message)
-        await message.channel.send(result)
-        return
+        # Ignore self messages
+        if 'PlaylistMaintainer' in str(message.author):
+            return
 
-    elif '/RemovePlaylist' in message.content:
-        RemoveMappedPlaylist(message)
-        await message.channel.send("Playlist unlinked from current channel")
-        return
+        if message.content == '/help':
+            await message.channel.send(GetHelpMessage(message))
+            return
 
-    elif GetIdsFromMessage(message.content) is not None:
+        elif '/AddPlaylist' in message.content:
+            result = MapNewPlaylist(message)
+            await message.channel.send(result)
+            return
 
-        track_ids = GetIdsFromMessage(message.content)
-        playlists = GetPlaylistsByChannel(message)
+        elif '/RemovePlaylist' in message.content:
+            RemoveMappedPlaylist(message)
+            await message.channel.send("Playlist unlinked from current channel")
+            return
 
-        for playlist in playlists:
-            playlist.AddTracks(track_ids)
+        elif GetIdsFromMessage(message.content) is not None:
 
-    else:
-        print('No spotify link found in message.')
+            track_ids = GetIdsFromMessage(message.content)
+            playlists = GetPlaylistsByChannel(message)
+
+            for playlist in playlists:
+                try:
+                    playlist.AddTracks(track_ids)
+                except:
+                    await message.channel.send(f"Song already exists in {playlist.PlaylistName}")
+
+        else:
+            print('No spotify link found in message.')
+
+    except:
+        await message.channel.send(f"Oh boy something went wrong, you shouldn't see this. Shutting down.")
+        exit()
 
 
 def GetIdsFromMessage(message):
@@ -117,8 +130,14 @@ def MapNewPlaylist(message):
         sql_connection.commit()
         return "Playlist linked to current channel."
 
+    except pyodbc.IntegrityError as e:
+        if e.args[0] == '23000':
+            return "Playlist already mapped to current channel."
+        else:
+            return "Error mapping playlist. Please try again."
+
     except:
-        return "Playlist already mapped to current channel."
+        return "Error mapping playlist. Please try again."
 
 
 def RemoveMappedPlaylist(message):
@@ -151,6 +170,7 @@ To map a playlist to this channel, use the command:
 
 To disconnect a playlist from this channel, use the command:
 /RemovePlaylist <playlist-url>
+
 '''
 
 
