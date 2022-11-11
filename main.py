@@ -31,6 +31,7 @@ async def on_ready():
 
 @client.event
 async def on_message(message):
+
     try:
 
         # Ignore self messages
@@ -51,6 +52,21 @@ async def on_message(message):
             await message.channel.send("Playlist unlinked from current channel")
             return
 
+        elif '/RemoveTrack' in message.content:
+
+            track_ids = GetIdsFromMessage(message.content)
+            playlists = GetPlaylistsByChannel(message)
+
+            for playlist in playlists:
+                try:
+                    playlist.RemoveTracks(track_ids)
+                except:
+                    await message.channel.send(f"Song not found in {playlist.PlaylistName}")
+
+        elif message.content == '/AddAllSongs':
+            await AddAllTracks(message)
+            return
+
         elif GetIdsFromMessage(message.content) is not None:
 
             track_ids = GetIdsFromMessage(message.content)
@@ -59,13 +75,14 @@ async def on_message(message):
             for playlist in playlists:
                 try:
                     playlist.AddTracks(track_ids)
-                except:
+
+                except Exception as ex:
+                    print(f'playlist.AddTracks(..) exception: {ex}')
                     await message.channel.send(f"Song already exists in {playlist.PlaylistName}")
+                    return
 
-        else:
-            print('No spotify link found in message.')
-
-    except:
+    except Exception as ex:
+        print(f'on_message exception: {ex.args}')
         await message.channel.send(f"Oh boy something went wrong, you shouldn't see this. Shutting down.")
         exit()
 
@@ -171,13 +188,58 @@ To map a playlist to this channel, use the command:
 To disconnect a playlist from this channel, use the command:
 /RemovePlaylist <playlist-url>
 
+To remove a song from this channel, use the command:
+/RemoveTrack <track-url>
+
+To add all the songs that have ever been posted in this channel, use the command:
+/AddAllSongs
+
 '''
 
 
 def FlushPlaylistCache():
     print('Flushing playlist cache')
-    __playlist_cache = []
+    __playlist_cache.clear()
     threading.Timer(86400, FlushPlaylistCache).start()
+
+
+async def AddAllTracks(message):
+
+    all_messages = message.channel.history(limit=10000)
+    tracks_posted_in_channel = []
+    tracks_marked_removed = []
+
+    # Get unique track ides from channel
+    async for message in all_messages:
+        if 'open.spotify.com/track' not in message.content:
+            continue
+        if 'PlaylistMaintainer' in str(message.author):
+            continue
+
+        track_url = Links.GetSpotifyLinks(message.content)[0]
+        track_id = Links.GetTrackId(track_url)
+
+        if '/RemoveTrack' in message.content:
+            tracks_marked_removed.append(track_id)
+            continue
+
+        if track_id not in tracks_posted_in_channel:
+            tracks_posted_in_channel.append(track_id)
+
+
+    # Add tracks to playlists
+    mapped_playlists = GetPlaylistsByChannel(message)
+    for playlist in mapped_playlists:
+
+        tracks_currently_in_playlist = [track['id'] for track in playlist.GetAllTracks()]
+        tracks_not_removed = list(set(tracks_posted_in_channel) - set(tracks_marked_removed))
+        tracks_to_add = list(set(tracks_not_removed) - set(tracks_currently_in_playlist))
+        if len(tracks_to_add) == 0:
+            continue
+
+        print(f'Adding {len(tracks_to_add)} new tracks to {playlist.PlaylistName}')
+
+        playlist.AddTracks(track_ids=tracks_to_add)
 
 
 if __name__ == '__main__':
