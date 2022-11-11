@@ -31,9 +31,7 @@ async def on_ready():
 
 @client.event
 async def on_message(message):
-
     try:
-
         # Ignore self messages
         if 'PlaylistMaintainer' in str(message.author):
             return
@@ -43,13 +41,19 @@ async def on_message(message):
             return
 
         elif '/AddPlaylist' in message.content:
+            if 'open.spotify.com/playlist/' not in message.content:
+                await message.channel.send('Invalid link provided')
+
             result = MapNewPlaylist(message)
             await message.channel.send(result)
             return
 
         elif '/RemovePlaylist' in message.content:
-            RemoveMappedPlaylist(message)
-            await message.channel.send("Playlist unlinked from current channel")
+            if 'open.spotify.com/playlist/' not in message.content:
+                await message.channel.send('Invalid link provided')
+                return
+
+            await message.channel.send(RemoveMappedPlaylist(message))
             return
 
         elif '/RemoveTrack' in message.content:
@@ -84,7 +88,6 @@ async def on_message(message):
     except Exception as ex:
         print(f'on_message exception: {ex.args}')
         await message.channel.send(f"Oh boy something went wrong, you shouldn't see this. Shutting down.")
-        exit()
 
 
 def GetIdsFromMessage(message):
@@ -170,6 +173,7 @@ WHERE PlaylistId = ?
     ''', [playlist_id, str(message.guild), str(message.channel)])
 
     sql_connection.commit()
+    return "Playlist unlinked from current channel."
 
 
 def GetHelpMessage(message):
