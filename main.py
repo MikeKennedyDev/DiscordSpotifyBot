@@ -31,45 +31,40 @@ async def on_ready():
 
 @client.event
 async def on_message(message):
+    print(message)
     try:
         # Ignore self messages
         if 'PlaylistMaintainer' in str(message.author):
             return
 
-        if message.content == '/help':
-            await message.channel.send(GetHelpMessage(message))
-            return
-
-        elif '/AddPlaylist' in message.content:
-            if 'open.spotify.com/playlist/' not in message.content:
-                await message.channel.send('Invalid link provided')
-
-            result = MapNewPlaylist(message)
-            await message.channel.send(result)
-            return
-
-        elif '/RemovePlaylist' in message.content:
-            if 'open.spotify.com/playlist/' not in message.content:
-                await message.channel.send('Invalid link provided')
+        if '/' in message.content:
+            if message.content == '/help':
+                await message.channel.send(GetHelpMessage(message))
                 return
 
-            await message.channel.send(RemoveMappedPlaylist(message))
-            return
+            elif 'open.spotify.com/playlist/' in message.content:
+                if '/AddPlaylist' in message.content:
+                    result = MapNewPlaylist(message)
+                    await message.channel.send(result)
+                    return
 
-        elif '/RemoveTrack' in message.content:
+                elif '/RemovePlaylist' in message.content:
+                    await message.channel.send(RemoveMappedPlaylist(message))
+                    return
 
-            track_ids = GetIdsFromMessage(message.content)
-            playlists = GetPlaylistsByChannel(message)
+            elif '/RemoveTrack' in message.content:
+                track_ids = GetIdsFromMessage(message.content)
+                playlists = GetPlaylistsByChannel(message)
 
-            for playlist in playlists:
-                try:
-                    playlist.RemoveTracks(track_ids)
-                except:
-                    await message.channel.send(f"Song not found in {playlist.PlaylistName}")
+                for playlist in playlists:
+                    try:
+                        playlist.RemoveTracks(track_ids)
+                    except:
+                        await message.channel.send(f"Song not found in {playlist.PlaylistName}")
 
-        elif message.content == '/AddAllSongs':
-            await AddAllTracks(message)
-            return
+            elif message.content == '/AddAllSongs':
+                await AddAllTracks(message)
+                return
 
         elif GetIdsFromMessage(message.content) is not None:
 
@@ -99,7 +94,8 @@ def GetIdsFromMessage(message):
 
         return [Links.GetTrackId(link) for link in track_links]
 
-    except:
+    except Exception as ex:
+        print(f'Error retrieving id: {ex}')
         return None
 
 
@@ -163,7 +159,7 @@ def MapNewPlaylist(message):
 def RemoveMappedPlaylist(message):
     playlist_url = message.content.split()[1]
     playlist_id = Links.GetPlaylistId(playlist_url)
-    print(f'Mapping playlist: {playlist_id} to current channel')
+    print(f'Removing playlist: {playlist_id} from current channel')
 
     cursor.execute('''
 DELETE FROM [dbo].[Playlists]
@@ -208,16 +204,14 @@ def FlushPlaylistCache():
 
 
 async def AddAllTracks(message):
-
     all_messages = message.channel.history(limit=10000)
     tracks_posted_in_channel = []
     tracks_marked_removed = []
 
     # Get unique track ides from channel
     async for message in all_messages:
-        if 'open.spotify.com/track' not in message.content:
-            continue
-        if 'PlaylistMaintainer' in str(message.author):
+        if 'open.spotify.com/track' not in message.content or \
+                'PlaylistMaintainer' in str(message.author):
             continue
 
         track_url = Links.GetSpotifyLinks(message.content)[0]
